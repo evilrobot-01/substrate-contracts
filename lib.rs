@@ -4,30 +4,46 @@ use ink_lang as ink;
 
 #[ink::contract]
 mod incrementer {
+    use ink_storage::traits::SpreadAllocate;
+
     #[ink(storage)]
+    #[derive(SpreadAllocate)]
     pub struct Incrementer {
-        value: i32,
+        value: ink_storage::Mapping<AccountId, i32>,
     }
 
     impl Incrementer {
         #[ink(constructor)]
         pub fn new(init_value: i32) -> Self {
-            Self { value: init_value }
+            // This call is required to correctly initialize the mapping of the contract.
+            ink_lang::utils::initialize_contract(|contract: &mut Self| {
+                let caller = Self::env().caller();
+                contract.value.insert(&caller, &init_value);
+            })
         }
 
         #[ink(constructor)]
         pub fn default() -> Self {
-            Self { value: 0 }
+            ink_lang::utils::initialize_contract(|_| {})
         }
 
         #[ink(message)]
         pub fn inc(&mut self, by: i32) {
-            self.value += by;
+            let caller = self.env().caller();
+            let value = self.get();
+            self.value.insert(caller, &(value + by));
         }
 
         #[ink(message)]
+        pub fn remove(&mut self) {
+            self.value.remove(&self.env().caller())
+        }
+
+        // Get the number associated with the caller's AccountId, if it exists
+        #[ink(message)]
         pub fn get(&self) -> i32 {
-            self.value
+            let caller = Self::env().caller();
+            self.value.get(&caller).unwrap_or_default()
         }
     }
 
@@ -49,13 +65,23 @@ mod incrementer {
         }
 
         #[ink::test]
-        fn it_works() {
-            let mut contract = Incrementer::new(42);
-            assert_eq!(contract.get(), 42);
+        fn inc_works() {
+            let mut contract = Incrementer::new(1);
+            assert_eq!(contract.get(), 1);
             contract.inc(5);
-            assert_eq!(contract.get(), 47);
-            contract.inc(-50);
-            assert_eq!(contract.get(), -3);
+            assert_eq!(contract.get(), 6);
+            contract.inc(5);
+            assert_eq!(contract.get(), 11);
+        }
+
+        #[ink::test]
+        fn remove_works() {
+            let mut contract = Incrementer::new(1);
+            assert_eq!(contract.get(), 1);
+            contract.inc(5);
+            assert_eq!(contract.get(), 6);
+            contract.remove();
+            assert_eq!(contract.get(), 0);
         }
     }
 }
